@@ -55,6 +55,62 @@ docker images | grep petclinic
 docker run -p 8080:8080 docker.io/library/spring-petclinic:latest
 ```
 
+## Model Context Protocol (MCP) Server
+
+Spring PetClinic includes a native [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server using the official MCP Java SDK with Server-Sent Events (SSE) / HTTP transport. This allows external AI assistants and agents (such as Claude Desktop, Cursor, and custom MCP clients) to interact with the PetClinic application.
+
+### Endpoints
+
+- **SSE Stream**: `GET http://localhost:8080/sse`
+- **JSON-RPC Messages**: `POST http://localhost:8080/mcp/message`
+
+### Available Tools
+
+The MCP server exposes 10 tools across 4 functional areas:
+
+| Area | Tool Name | Description | Parameters |
+| :--- | :--- | :--- | :--- |
+| **Owner Management** | `search_owners` | Search owners by last name (or all if omitted), with pet summaries | `lastName` *(optional)*, `page` *(optional)* |
+| | `get_owner_details` | Retrieve full owner profile, including pet info and complete visit histories | `ownerId` *(required)* |
+| | `add_owner` | Register a new pet owner | `firstName`, `lastName`, `address`, `city`, `telephone` |
+| | `update_owner` | Update contact details for an existing owner | `ownerId`, `firstName`, `lastName`, `address`, etc. |
+| **Pet Records** | `list_pet_types` | List all supported pet types (cat, dog, bird, etc.) | *None* |
+| | `add_pet` | Add a new pet record to an existing owner | `ownerId`, `name`, `birthDate` (YYYY-MM-DD), `petType` |
+| | `update_pet` | Update pet details (name, birth date, pet type) | `ownerId`, `petId`, `name`, `birthDate`, `petType` |
+| **Visits & Scheduling** | `schedule_visit` | Schedule a clinic visit for an owner's pet | `ownerId`, `petId`, `visitDate` (YYYY-MM-DD), `description` |
+| | `get_pet_visits` | View past visit history for a pet | `ownerId`, `petId` |
+| **Veterinarians** | `list_vets` | List all veterinarians and their clinical specialties | *None* |
+
+### Connecting an MCP Client
+
+1. **Start PetClinic**:
+   ```bash
+   ./mvnw spring-boot:run
+   ```
+
+2. **Configure Your Client**:
+
+   **Claude Desktop / Cursor (`claude_desktop_config.json`):**
+   ```json
+   {
+     "mcpServers": {
+       "spring-petclinic": {
+         "url": "http://localhost:8080/sse"
+       }
+     }
+   }
+   ```
+
+   **MCP Inspector CLI (testing tool):**
+   ```bash
+   npx @modelcontextprotocol/inspector http://localhost:8080/sse
+   ```
+
+3. **Run MCP Automated Tests**:
+   ```bash
+   ./mvnw test -Dtest=PetClinicMcpTests
+   ```
+
 ## In case you find a bug/suggested improvement for Spring Petclinic
 
 Our issue tracker is available [here](https://github.com/spring-projects/spring-petclinic/issues).
