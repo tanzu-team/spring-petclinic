@@ -18,11 +18,14 @@ package org.springframework.samples.petclinic.mcp;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.junit.jupiter.api.Test;
@@ -61,6 +64,38 @@ class PetClinicMcpTests {
 		String content = getText(result);
 		assertThat(content).contains("Davis");
 		assertThat(content).contains("Betty");
+	}
+
+	@Test
+	@Transactional(readOnly = true)
+	void testFindOwnersByPetName() {
+		McpSchema.CallToolResult result = this.mcpTools.findOwnersByPetName(Map.of("petName", "Basil"));
+		assertThat(result.isError()).isFalse();
+		String content = getText(result);
+		assertThat(content).contains("Betty");
+		assertThat(content).contains("Davis");
+		assertThat(content).contains("Basil");
+	}
+
+	@Test
+	@Transactional(readOnly = true)
+	void testFindOwnersByPetNameIsCaseInsensitiveAndPartial() {
+		McpSchema.CallToolResult result = this.mcpTools.findOwnersByPetName(Map.of("petName", "luck"));
+		assertThat(result.isError()).isFalse();
+		String content = getText(result);
+		assertThat(content).contains("Jeff");
+		assertThat(content).contains("Carlos");
+		assertThat(content).contains("Lucky");
+	}
+
+	@Test
+	@Transactional(readOnly = true)
+	void testFindOwnersByUnknownPetNameReturnsEmpty() throws Exception {
+		McpSchema.CallToolResult result = this.mcpTools.findOwnersByPetName(Map.of("petName", "Rex"));
+		assertThat(result.isError()).isFalse();
+		JsonNode owners = this.objectMapper.readTree(getText(result));
+		assertThat(owners.isArray()).isTrue();
+		assertThat(owners).isEmpty();
 	}
 
 	@Test
@@ -148,6 +183,52 @@ class PetClinicMcpTests {
 		assertThat(content).contains("Carter");
 		assertThat(content).contains("Helen");
 		assertThat(content).contains("radiology");
+	}
+
+	@Test
+	void testStreamableHttpEndpointAvailability() throws Exception {
+		URL url = URI.create("http://localhost:" + this.port + "/mcp").toURL();
+		HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+		conn.setRequestMethod("POST");
+		conn.setRequestProperty("Content-Type", "application/json");
+		conn.setRequestProperty("Accept", "application/json, text/event-stream");
+		conn.setConnectTimeout(5000);
+		conn.setReadTimeout(5000);
+		conn.setDoOutput(true);
+
+		String request = """
+				{
+					"jsonrpc": "2.0",
+					"id": 1,
+					"method": "initialize",
+					"params": {
+						"protocolVersion": "2025-06-18",
+						"capabilities": {},
+						"clientInfo": { "name": "petclinic-test", "version": "1.0.0" }
+					}
+				}
+				""";
+		try (OutputStream out = conn.getOutputStream()) {
+			out.write(request.getBytes(StandardCharsets.UTF_8));
+		}
+
+		try {
+			assertThat(conn.getResponseCode()).isEqualTo(200);
+			assertThat(conn.getHeaderField("Mcp-Session-Id")).isNotBlank();
+
+			try (BufferedReader reader = new BufferedReader(
+					new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
+				StringBuilder sb = new StringBuilder();
+				String line;
+				while ((line = reader.readLine()) != null) {
+					sb.append(line);
+				}
+				assertThat(sb.toString()).contains("spring-petclinic-mcp");
+			}
+		}
+		finally {
+			conn.disconnect();
+		}
 	}
 
 	@Test

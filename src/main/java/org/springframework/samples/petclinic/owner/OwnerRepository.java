@@ -20,6 +20,8 @@ import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 /**
  * Repository class for <code>Owner</code> domain objects. All method names are compliant
@@ -43,6 +45,17 @@ public interface OwnerRepository extends JpaRepository<Owner, Integer> {
 	 * found)
 	 */
 	Page<Owner> findByLastNameStartingWith(String lastName, Pageable pageable);
+
+	/**
+	 * Retrieve {@link Owner}s whose pets include one whose name <i>contains</i> the given
+	 * text, ignoring case.
+	 * @param petName Value to search for within pet names
+	 * @param pageable the pagination information
+	 * @return a Page of matching {@link Owner}s (or an empty Page if none found)
+	 */
+	@Query(value = "select distinct o from Owner o join o.pets p where lower(p.name) like lower(concat('%', :petName, '%'))",
+			countQuery = "select count(distinct o) from Owner o join o.pets p where lower(p.name) like lower(concat('%', :petName, '%'))")
+	Page<Owner> findByPetNameContainingIgnoreCase(@Param("petName") String petName, Pageable pageable);
 
 	/**
 	 * Retrieve an {@link Owner} from the data store by id.

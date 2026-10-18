@@ -22,11 +22,14 @@ import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.modelcontextprotocol.json.McpJsonMapper;
 import io.modelcontextprotocol.server.McpServer;
+import io.modelcontextprotocol.server.McpSyncServerExchange;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -58,17 +61,21 @@ public class PetClinicMcpTools {
 
 	private final ObjectMapper objectMapper;
 
+	private final McpJsonMapper mcpJsonMapper;
+
 	public PetClinicMcpTools(OwnerRepository ownerRepository, PetTypeRepository petTypeRepository,
-			VetRepository vetRepository, ObjectMapper objectMapper) {
+			VetRepository vetRepository, ObjectMapper objectMapper, McpJsonMapper mcpJsonMapper) {
 		this.ownerRepository = ownerRepository;
 		this.petTypeRepository = petTypeRepository;
 		this.vetRepository = vetRepository;
 		this.objectMapper = objectMapper;
+		this.mcpJsonMapper = mcpJsonMapper;
 	}
 
-	public void registerTools(McpServer.SyncSpec syncSpec) {
+	public void registerTools(McpServer.SyncSpecification<?> syncSpec) {
 		// Area 1: Pet Owner Management
 		registerSearchOwners(syncSpec);
+		registerFindOwnersByPetName(syncSpec);
 		registerGetOwnerDetails(syncSpec);
 		registerAddOwner(syncSpec);
 		registerUpdateOwner(syncSpec);
@@ -90,7 +97,7 @@ public class PetClinicMcpTools {
 	// Area 1: Pet Owner Management
 	// -------------------------------------------------------------------------
 
-	private void registerSearchOwners(McpServer.SyncSpec syncSpec) {
+	private void registerSearchOwners(McpServer.SyncSpecification<?> syncSpec) {
 		String schema = """
 				{
 					"type": "object",
@@ -102,7 +109,7 @@ public class PetClinicMcpTools {
 					}
 				}
 				""";
-		McpSchema.Tool tool = new McpSchema.Tool("search_owners",
+		McpSchema.Tool tool = tool("search_owners",
 				"Search for pet owners by last name prefix, or retrieve all owners if left blank.", schema);
 		syncSpec.tool(tool, wrap(this::searchOwners));
 	}
@@ -114,29 +121,43 @@ public class PetClinicMcpTools {
 
 		List<Map<String, Object>> result = new ArrayList<>();
 		for (Owner owner : page.getContent()) {
-			Map<String, Object> map = new LinkedHashMap<>();
-			map.put("id", owner.getId());
-			map.put("firstName", owner.getFirstName());
-			map.put("lastName", owner.getLastName());
-			map.put("address", owner.getAddress());
-			map.put("city", owner.getCity());
-			map.put("telephone", owner.getTelephone());
-
-			List<Map<String, Object>> pets = new ArrayList<>();
-			for (Pet pet : owner.getPets()) {
-				Map<String, Object> petMap = new LinkedHashMap<>();
-				petMap.put("id", pet.getId());
-				petMap.put("name", pet.getName());
-				petMap.put("type", pet.getType() != null ? pet.getType().getName() : "unknown");
-				pets.add(petMap);
-			}
-			map.put("pets", pets);
-			result.add(map);
+			result.add(ownerSummary(owner));
 		}
 		return successResult(result);
 	}
 
-	private void registerGetOwnerDetails(McpServer.SyncSpec syncSpec) {
+	private void registerFindOwnersByPetName(McpServer.SyncSpecification<?> syncSpec) {
+		String schema = """
+				{
+					"type": "object",
+					"properties": {
+						"petName": {
+							"type": "string",
+							"description": "Full or partial name of the pet to search for (case-insensitive)."
+						}
+					},
+					"required": ["petName"]
+				}
+				""";
+		McpSchema.Tool tool = tool("find_owners_by_pet_name",
+				"Find the owner(s) of a pet by the pet's name. Use this when you know a pet's name and need its owner, then call get_owner_details with the returned owner id.",
+				schema);
+		syncSpec.tool(tool, wrap(this::findOwnersByPetName));
+	}
+
+	@Transactional(readOnly = true)
+	public McpSchema.CallToolResult findOwnersByPetName(Map<String, Object> args) {
+		String petName = getRequiredString(args, "petName");
+		Page<Owner> page = this.ownerRepository.findByPetNameContainingIgnoreCase(petName, PageRequest.of(0, 100));
+
+		List<Map<String, Object>> result = new ArrayList<>();
+		for (Owner owner : page.getContent()) {
+			result.add(ownerSummary(owner));
+		}
+		return successResult(result);
+	}
+
+	private void registerGetOwnerDetails(McpServer.SyncSpecification<?> syncSpec) {
 		String schema = """
 				{
 					"type": "object",
@@ -149,7 +170,7 @@ public class PetClinicMcpTools {
 					"required": ["ownerId"]
 				}
 				""";
-		McpSchema.Tool tool = new McpSchema.Tool("get_owner_details",
+		McpSchema.Tool tool = tool("get_owner_details",
 				"Retrieve comprehensive details for an owner including contact information, registered pets, and visit history.",
 				schema);
 		syncSpec.tool(tool, wrap(this::getOwnerDetails));
@@ -192,7 +213,7 @@ public class PetClinicMcpTools {
 		return successResult(map);
 	}
 
-	private void registerAddOwner(McpServer.SyncSpec syncSpec) {
+	private void registerAddOwner(McpServer.SyncSpecification<?> syncSpec) {
 		String schema = """
 				{
 					"type": "object",
@@ -206,7 +227,7 @@ public class PetClinicMcpTools {
 					"required": ["firstName", "lastName", "address", "city", "telephone"]
 				}
 				""";
-		McpSchema.Tool tool = new McpSchema.Tool("add_owner", "Register a new pet owner in the clinic.", schema);
+		McpSchema.Tool tool = tool("add_owner", "Register a new pet owner in the clinic.", schema);
 		syncSpec.tool(tool, wrap(this::addOwner));
 	}
 
@@ -242,7 +263,7 @@ public class PetClinicMcpTools {
 		return successResult(resp);
 	}
 
-	private void registerUpdateOwner(McpServer.SyncSpec syncSpec) {
+	private void registerUpdateOwner(McpServer.SyncSpecification<?> syncSpec) {
 		String schema = """
 				{
 					"type": "object",
@@ -257,8 +278,8 @@ public class PetClinicMcpTools {
 					"required": ["ownerId"]
 				}
 				""";
-		McpSchema.Tool tool = new McpSchema.Tool("update_owner",
-				"Update contact or profile information for an existing pet owner.", schema);
+		McpSchema.Tool tool = tool("update_owner", "Update contact or profile information for an existing pet owner.",
+				schema);
 		syncSpec.tool(tool, wrap(this::updateOwner));
 	}
 
@@ -310,14 +331,14 @@ public class PetClinicMcpTools {
 	// Area 2: Pet Records Management
 	// -------------------------------------------------------------------------
 
-	private void registerListPetTypes(McpServer.SyncSpec syncSpec) {
+	private void registerListPetTypes(McpServer.SyncSpecification<?> syncSpec) {
 		String schema = """
 				{
 					"type": "object",
 					"properties": {}
 				}
 				""";
-		McpSchema.Tool tool = new McpSchema.Tool("list_pet_types",
+		McpSchema.Tool tool = tool("list_pet_types",
 				"List all supported pet types (e.g. cat, dog, bird, hamster, lizard, snake).", schema);
 		syncSpec.tool(tool, wrap(this::listPetTypes));
 	}
@@ -335,7 +356,7 @@ public class PetClinicMcpTools {
 		return successResult(result);
 	}
 
-	private void registerAddPet(McpServer.SyncSpec syncSpec) {
+	private void registerAddPet(McpServer.SyncSpecification<?> syncSpec) {
 		String schema = """
 				{
 					"type": "object",
@@ -348,7 +369,7 @@ public class PetClinicMcpTools {
 					"required": ["ownerId", "name", "birthDate", "petType"]
 				}
 				""";
-		McpSchema.Tool tool = new McpSchema.Tool("add_pet", "Register a new pet for an existing owner.", schema);
+		McpSchema.Tool tool = tool("add_pet", "Register a new pet for an existing owner.", schema);
 		syncSpec.tool(tool, wrap(this::addPet));
 	}
 
@@ -385,7 +406,7 @@ public class PetClinicMcpTools {
 		return successResult(resp);
 	}
 
-	private void registerUpdatePet(McpServer.SyncSpec syncSpec) {
+	private void registerUpdatePet(McpServer.SyncSpecification<?> syncSpec) {
 		String schema = """
 				{
 					"type": "object",
@@ -399,7 +420,7 @@ public class PetClinicMcpTools {
 					"required": ["ownerId", "petId"]
 				}
 				""";
-		McpSchema.Tool tool = new McpSchema.Tool("update_pet", "Update details of an existing pet.", schema);
+		McpSchema.Tool tool = tool("update_pet", "Update details of an existing pet.", schema);
 		syncSpec.tool(tool, wrap(this::updatePet));
 	}
 
@@ -444,7 +465,7 @@ public class PetClinicMcpTools {
 	// Area 3: Visit & Appointment Scheduling
 	// -------------------------------------------------------------------------
 
-	private void registerScheduleVisit(McpServer.SyncSpec syncSpec) {
+	private void registerScheduleVisit(McpServer.SyncSpecification<?> syncSpec) {
 		String schema = """
 				{
 					"type": "object",
@@ -457,8 +478,8 @@ public class PetClinicMcpTools {
 					"required": ["ownerId", "petId", "visitDate", "description"]
 				}
 				""";
-		McpSchema.Tool tool = new McpSchema.Tool("schedule_visit",
-				"Schedule a veterinary consultation or clinical visit for a pet.", schema);
+		McpSchema.Tool tool = tool("schedule_visit", "Schedule a veterinary consultation or clinical visit for a pet.",
+				schema);
 		syncSpec.tool(tool, wrap(this::scheduleVisit));
 	}
 
@@ -495,7 +516,7 @@ public class PetClinicMcpTools {
 		return successResult(resp);
 	}
 
-	private void registerGetPetVisits(McpServer.SyncSpec syncSpec) {
+	private void registerGetPetVisits(McpServer.SyncSpecification<?> syncSpec) {
 		String schema = """
 				{
 					"type": "object",
@@ -506,8 +527,7 @@ public class PetClinicMcpTools {
 					"required": ["ownerId", "petId"]
 				}
 				""";
-		McpSchema.Tool tool = new McpSchema.Tool("get_pet_visits",
-				"Retrieve the visit and consultation history for a pet.", schema);
+		McpSchema.Tool tool = tool("get_pet_visits", "Retrieve the visit and consultation history for a pet.", schema);
 		syncSpec.tool(tool, wrap(this::getPetVisits));
 	}
 
@@ -539,15 +559,15 @@ public class PetClinicMcpTools {
 	// Area 4: Veterinarian Directory
 	// -------------------------------------------------------------------------
 
-	private void registerListVets(McpServer.SyncSpec syncSpec) {
+	private void registerListVets(McpServer.SyncSpecification<?> syncSpec) {
 		String schema = """
 				{
 					"type": "object",
 					"properties": {}
 				}
 				""";
-		McpSchema.Tool tool = new McpSchema.Tool("list_vets",
-				"List all veterinarians in the clinic along with their specialties.", schema);
+		McpSchema.Tool tool = tool("list_vets", "List all veterinarians in the clinic along with their specialties.",
+				schema);
 		syncSpec.tool(tool, wrap(this::listVets));
 	}
 
@@ -585,9 +605,38 @@ public class PetClinicMcpTools {
 				"Pet type '" + name + "' not found. Available types can be queried via list_pet_types.");
 	}
 
-	private Function<Map<String, Object>, McpSchema.CallToolResult> wrap(
+	private Map<String, Object> ownerSummary(Owner owner) {
+		Map<String, Object> map = new LinkedHashMap<>();
+		map.put("id", owner.getId());
+		map.put("firstName", owner.getFirstName());
+		map.put("lastName", owner.getLastName());
+		map.put("address", owner.getAddress());
+		map.put("city", owner.getCity());
+		map.put("telephone", owner.getTelephone());
+
+		List<Map<String, Object>> pets = new ArrayList<>();
+		for (Pet pet : owner.getPets()) {
+			Map<String, Object> petMap = new LinkedHashMap<>();
+			petMap.put("id", pet.getId());
+			petMap.put("name", pet.getName());
+			petMap.put("type", pet.getType() != null ? pet.getType().getName() : "unknown");
+			pets.add(petMap);
+		}
+		map.put("pets", pets);
+		return map;
+	}
+
+	private McpSchema.Tool tool(String name, String description, String inputSchema) {
+		return McpSchema.Tool.builder()
+			.name(name)
+			.description(description)
+			.inputSchema(this.mcpJsonMapper, inputSchema)
+			.build();
+	}
+
+	private BiFunction<McpSyncServerExchange, Map<String, Object>, McpSchema.CallToolResult> wrap(
 			Function<Map<String, Object>, McpSchema.CallToolResult> handler) {
-		return (args) -> {
+		return (exchange, args) -> {
 			try {
 				return handler.apply(args);
 			}

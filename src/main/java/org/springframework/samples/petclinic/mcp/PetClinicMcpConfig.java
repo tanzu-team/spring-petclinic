@@ -17,9 +17,12 @@
 package org.springframework.samples.petclinic.mcp;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.modelcontextprotocol.json.McpJsonMapper;
+import io.modelcontextprotocol.json.jackson2.JacksonMcpJsonMapper;
 import io.modelcontextprotocol.server.McpServer;
 import io.modelcontextprotocol.server.McpSyncServer;
-import io.modelcontextprotocol.server.transport.WebMvcSseServerTransport;
+import io.modelcontextprotocol.server.transport.WebMvcSseServerTransportProvider;
+import io.modelcontextprotocol.server.transport.WebMvcStreamableServerTransportProvider;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
@@ -28,11 +31,15 @@ import org.springframework.web.servlet.function.RouterFunction;
 import org.springframework.web.servlet.function.ServerResponse;
 
 /**
- * Spring configuration registering the MCP SSE transport, routing endpoints, and the
- * synchronous MCP server.
+ * Spring configuration registering the MCP SSE (legacy) and Streamable HTTP transports,
+ * their routing endpoints, and the synchronous MCP servers backed by them.
  */
 @Configuration(proxyBeanMethods = false)
 public class PetClinicMcpConfig {
+
+	private static final String SERVER_NAME = "spring-petclinic-mcp";
+
+	private static final String SERVER_VERSION = "1.0.0";
 
 	@Bean
 	@ConditionalOnMissingBean
@@ -43,19 +50,47 @@ public class PetClinicMcpConfig {
 	}
 
 	@Bean
-	public WebMvcSseServerTransport webMvcSseServerTransport(ObjectMapper objectMapper) {
-		return new WebMvcSseServerTransport(objectMapper, "/mcp/message", "/sse");
+	public McpJsonMapper mcpJsonMapper(ObjectMapper objectMapper) {
+		return new JacksonMcpJsonMapper(objectMapper);
 	}
 
 	@Bean
-	public RouterFunction<ServerResponse> mcpRouterFunction(WebMvcSseServerTransport transport) {
-		return transport.getRouterFunction();
+	public WebMvcSseServerTransportProvider webMvcSseServerTransportProvider(McpJsonMapper mcpJsonMapper) {
+		return WebMvcSseServerTransportProvider.builder()
+			.jsonMapper(mcpJsonMapper)
+			.messageEndpoint("/mcp/message")
+			.sseEndpoint("/sse")
+			.build();
 	}
 
 	@Bean
-	public McpSyncServer mcpSyncServer(WebMvcSseServerTransport transport, PetClinicMcpTools tools) {
-		McpServer.SyncSpec syncSpec = McpServer.sync(transport)
-			.serverInfo("spring-petclinic-mcp", "1.0.0")
+	public WebMvcStreamableServerTransportProvider webMvcStreamableServerTransportProvider(
+			McpJsonMapper mcpJsonMapper) {
+		return WebMvcStreamableServerTransportProvider.builder().jsonMapper(mcpJsonMapper).mcpEndpoint("/mcp").build();
+	}
+
+	@Bean
+	public RouterFunction<ServerResponse> mcpRouterFunction(WebMvcSseServerTransportProvider sseTransport,
+			WebMvcStreamableServerTransportProvider streamableTransport) {
+		return sseTransport.getRouterFunction().and(streamableTransport.getRouterFunction());
+	}
+
+	@Bean
+	public McpSyncServer mcpSseServer(WebMvcSseServerTransportProvider transport, PetClinicMcpTools tools) {
+		McpServer.SyncSpecification<?> syncSpec = McpServer.sync(transport)
+			.serverInfo(SERVER_NAME, SERVER_VERSION)
+			.capabilities(McpSchema.ServerCapabilities.builder().tools(true).build());
+
+		tools.registerTools(syncSpec);
+
+		return syncSpec.build();
+	}
+
+	@Bean
+	public McpSyncServer mcpStreamableServer(WebMvcStreamableServerTransportProvider transport,
+			PetClinicMcpTools tools) {
+		McpServer.SyncSpecification<?> syncSpec = McpServer.sync(transport)
+			.serverInfo(SERVER_NAME, SERVER_VERSION)
 			.capabilities(McpSchema.ServerCapabilities.builder().tools(true).build());
 
 		tools.registerTools(syncSpec);

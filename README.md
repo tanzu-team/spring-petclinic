@@ -1,4 +1,4 @@
-# Spring PetClinic Sample Application [![Build Status](https://github.com/spring-projects/spring-petclinic/actions/workflows/maven-build.yml/badge.svg)](https://github.com/spring-projects/spring-petclinic/actions/workflows/maven-build.yml)[![Build Status](https://github.com/spring-projects/spring-petclinic/actions/workflows/gradle-build.yml/badge.svg)](https://github.com/spring-projects/spring-petclinic/actions/workflows/gradle-build.yml)
+# Spring PetClinic Sample Application [![Build Status](https://github.com/spring-projects/spring-petclinic/actions/workflows/maven-build.yml/badge.svg)](https://github.com/spring-projects/spring-petclinic/actions/workflows/maven-build.yml)
 
 [![Open in Gitpod](https://gitpod.io/button/open-in-gitpod.svg)](https://gitpod.io/#https://github.com/spring-projects/spring-petclinic) [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://github.com/codespaces/new?hide_repo_select=true&ref=main&repo=7517918)
 
@@ -13,7 +13,7 @@ See the presentation here:
 
 ## Run Petclinic locally
 
-Spring Petclinic is a [Spring Boot](https://spring.io/guides/gs/spring-boot) application built using [Maven](https://spring.io/guides/gs/maven/) or [Gradle](https://spring.io/guides/gs/gradle/).
+Spring Petclinic is a [Spring Boot](https://spring.io/guides/gs/spring-boot) application built using [Maven](https://spring.io/guides/gs/maven/).
 Java 17 or later is required for the build, and the application can run with Java 17 or newer.
 
 You first need to clone the project locally:
@@ -22,15 +22,10 @@ You first need to clone the project locally:
 git clone https://github.com/spring-projects/spring-petclinic.git
 cd spring-petclinic
 ```
-If you are using Maven, you can start the application on the command-line as follows:
+You can start the application on the command-line as follows:
 
 ```bash
 ./mvnw spring-boot:run
-```
-With Gradle, the command is as follows:
-
-```bash
-./gradlew bootRun
 ```
 
 You can then access the Petclinic at <http://localhost:8080/>.
@@ -57,20 +52,22 @@ docker run -p 8080:8080 docker.io/library/spring-petclinic:latest
 
 ## Model Context Protocol (MCP) Server
 
-Spring PetClinic includes a native [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server using the official MCP Java SDK with Server-Sent Events (SSE) / HTTP transport. This allows external AI assistants and agents (such as Claude Desktop, Cursor, and custom MCP clients) to interact with the PetClinic application.
+Spring PetClinic includes a native [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server using the official MCP Java SDK with Streamable HTTP and Server-Sent Events (SSE) transports. This allows external AI assistants and agents (such as Claude Desktop, Cursor, and custom MCP clients) to interact with the PetClinic application.
 
 ### Endpoints
 
-- **SSE Stream**: `GET http://localhost:8080/sse`
-- **JSON-RPC Messages**: `POST http://localhost:8080/mcp/message`
+- **Streamable HTTP** (recommended, spec `2025-03-26`): `http://localhost:8080/mcp`
+- **SSE Stream** (legacy): `GET http://localhost:8080/sse`
+- **SSE JSON-RPC Messages** (legacy): `POST http://localhost:8080/mcp/message`
 
 ### Available Tools
 
-The MCP server exposes 10 tools across 4 functional areas:
+The MCP server exposes 11 tools across 4 functional areas:
 
 | Area | Tool Name | Description | Parameters |
 | :--- | :--- | :--- | :--- |
 | **Owner Management** | `search_owners` | Search owners by last name (or all if omitted), with pet summaries | `lastName` *(optional)*, `page` *(optional)* |
+| | `find_owners_by_pet_name` | Find the owner(s) of a pet by the pet's name (case-insensitive, partial match) | `petName` *(required)* |
 | | `get_owner_details` | Retrieve full owner profile, including pet info and complete visit histories | `ownerId` *(required)* |
 | | `add_owner` | Register a new pet owner | `firstName`, `lastName`, `address`, `city`, `telephone` |
 | | `update_owner` | Update contact details for an existing owner | `ownerId`, `firstName`, `lastName`, `address`, etc. |
@@ -90,11 +87,58 @@ The MCP server exposes 10 tools across 4 functional areas:
 
 2. **Configure Your Client**:
 
+   **Streamable HTTP (recommended):**
+
    **Claude Desktop / Cursor (`claude_desktop_config.json`):**
    ```json
    {
      "mcpServers": {
        "spring-petclinic": {
+         "type": "streamable-http",
+         "url": "http://localhost:8080/mcp"
+       }
+     }
+   }
+   ```
+
+   **Cline (`cline_mcp_settings.json`):**
+   In Cline's UI dropdown, select **HTTP**. In `cline_mcp_settings.json`, configure:
+   ```json
+   {
+     "mcpServers": {
+       "spring-petclinic": {
+         "type": "streamableHttp",
+         "url": "http://localhost:8080/mcp"
+       }
+     }
+   }
+   ```
+
+   **MCP Inspector CLI (testing tool):**
+   ```bash
+   npx @modelcontextprotocol/inspector http://localhost:8080/mcp
+   ```
+
+   **Server-Sent Events (SSE, legacy):**
+
+   **Claude Desktop / Cursor (`claude_desktop_config.json`):**
+   ```json
+   {
+     "mcpServers": {
+       "spring-petclinic": {
+         "url": "http://localhost:8080/sse"
+       }
+     }
+   }
+   ```
+
+   **Cline (`cline_mcp_settings.json`):**
+   In Cline's UI dropdown, select **SSE**. In `cline_mcp_settings.json`, configure:
+   ```json
+   {
+     "mcpServers": {
+       "spring-petclinic": {
+         "type": "sse",
          "url": "http://localhost:8080/sse"
        }
      }
@@ -156,7 +200,7 @@ At development time we recommend you use the test applications set up as `main()
 
 ## Compiling the CSS
 
-There is a `petclinic.css` in `src/main/resources/static/resources/css`. It was generated from the `petclinic.scss` source, combined with the [Bootstrap](https://getbootstrap.com/) library. If you make changes to the `scss`, or upgrade Bootstrap, you will need to re-compile the CSS resources using the Maven profile "css", i.e. `./mvnw package -P css`. There is no build profile for Gradle to compile the CSS.
+There is a `petclinic.css` in `src/main/resources/static/resources/css`. It was generated from the `petclinic.scss` source, combined with the [Bootstrap](https://getbootstrap.com/) library. If you make changes to the `scss`, or upgrade Bootstrap, you will need to re-compile the CSS resources using the Maven profile "css", i.e. `./mvnw package -P css`.
 
 ## Working with Petclinic in your IDE
 
