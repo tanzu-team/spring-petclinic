@@ -1,8 +1,16 @@
 ---
 applications:
 - name: spring-petclinic
+  metadata:
+    labels:
+      app: spring-petclinic
+      ai.tanzu.com/type: petclinic-mcp-server
   memory: 1G
   random-route: true
+  routes:
+    - route: spring-petclinic-mcp.apps.internal
+  buildpacks:
+    - java_buildpack_offline
   path: target/spring-petclinic-4.0.0-SNAPSHOT.jar
   env:
     JBP_CONFIG_OPEN_JDK_JRE: '{ jre: { version: 17.+ } }'
